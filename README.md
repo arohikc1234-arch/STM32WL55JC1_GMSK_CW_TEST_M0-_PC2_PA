@@ -203,3 +203,346 @@ void Satellite_CW_CarrierOff(void) {
 
 ---
 *Document produced automatically by Antigravity IDE for STM32WL55 JC2 Satellite Mission.*
+
+
+# GMSK Telemetry – Final 128-Byte Placeholder Version
+
+## Target
+
+- **Hardware:** STM32WL55JC dual-core
+- **Core:** Cortex-M0+ standalone radio application
+- **Purpose:** Verify transmission of a full 128-byte binary telemetry Information/Data field through the existing AX.25 → G3RUH → GMSK radio chain.
+
+---
+
+## Current Data Path
+
+```text
+M0+ local placeholder
+        │
+        ▼
+128-byte telemetry buffer
+        │
+        ▼
+Protocol_CreatePacket()
+        │
+        ▼
+AX.25
+        │
+        ▼
+G3RUH
+        │
+        ▼
+Existing GMSK / radio path
+        │
+        ▼
+SX1262
+        │
+        ▼
+RF
+```
+
+The current placeholder data is:
+
+```text
+00 01 02 03 ... 7D 7E 7F
+```
+
+This provides a deterministic 128-byte binary payload for testing.
+
+---
+
+## M4 / Ring Buffer Status
+
+The **M4 → M0+ shared SRAM/ring-buffer path is NOT enabled** in this version.
+
+The future ring-buffer implementation remains commented out.
+
+For this test :
+
+
+- Do not enable the IPC ring-buffer code.
+- Do not modify the existing IPC ring-buffer implementation.
+- Do not connect the camera data source yet.
+- The M0+ uses only the local 128-byte placeholder.
+
+The future data path will be:
+
+```text
+Camera
+   │
+   ▼
+M4
+   │
+   ▼
+Shared SRAM / Ring Buffer
+   │
+   ▼
+M0+
+   │
+   ▼
+Telemetry_GetReceivedData()
+   │
+   ▼
+AX.25 → G3RUH → GMSK
+```
+
+---
+
+# Required Project Changes
+
+## 1. `protocol/ax25/ax25.h`
+
+Change the maximum AX.25 payload size to 128 bytes:
+
+```c
+#define AX25_MAX_PAYLOAD_LEN 128
+```
+
+---
+
+## 2. `Mission/config.h`
+
+For the first 128-byte telemetry test:
+
+```c
+#define PROTOCOL_LEADING_FLAG_COUNT 2
+```
+
+Keep the physical radio buffer size large enough:
+
+```c
+#define RADIO_FIXED_PACKET_LEN 200
+```
+
+---
+
+## 3. `Makefile`
+
+Add the telemetry placeholder source file to `C_SRCS`:
+
+```make
+Mission/telemetry_placeholder.c ```
+
+Place it with the other `Mission/*.c` source files.
+
+---
+
+## 4. `satellite_app.c`
+
+Use the finalized `satellite_app.c`.
+
+The updated implementation:
+
+- Includes `Mission/telemetry_placeholder.h`
+- Declares a 128-byte telemetry buffer
+- Removes the old dynamic text payload from the GMSK burst loop
+- Calls `Telemetry_GetReceivedData()`
+- Requires exactly 128 bytes for this test
+- Passes the binary telemetry buffer to `Protocol_CreatePacket()`
+- Keeps the existing AX.25/G3RUH/GMSK/radio transmission path
+- Does not enable the M4 ring buffer
+
+---
+
+# Files
+
+The final implementation consists of:
+
+```text
+satellite_app.c
+telemetry_placeholder.c
+telemetry_placeholder.h
+README.md
+```
+
+### `telemetry_placeholder.h`
+
+Defines the telemetry payload size:
+
+```c
+#define TELEMETRY_DATA_SIZE 128U
+```
+
+and exposes:
+
+```c
+bool Telemetry_GetReceivedData(
+    uint8_t *buffer,
+    uint16_t bufferSize,
+    uint16_t *dataLength);
+```
+
+### `telemetry_placeholder.c`
+
+Currently generates the deterministic placeholder:
+
+```text
+00 01 02 03 ... 7D 7E 7F
+```
+
+and copies all 128 bytes into the caller's buffer.
+
+The future M4 → ring-buffer implementation is kept commented out.
+
+---
+
+# Expected Placeholder Data
+
+The complete 128-byte test payload is:
+
+```text
+00 01 02 03 04 05 06 07
+08 09 0A 0B 0C 0D 0E 0F
+10 11 12 13 14 15 16 17
+18 19 1A 1B 1C 1D 1E 1F
+20 21 22 23 24 25 26 27
+28 29 2A 2B 2C 2D 2E 2F
+30 31 32 33 34 35 36 37
+38 39 3A 3B 3C 3D 3E 3F
+40 41 42 43 44 45 46 47
+48 49 4A 4B 4C 4D 4E 4F
+50 51 52 53 54 55 56 57
+58 59 5A 5B 5C 5D 5E 5F
+60 61 62 63 64 65 66 67
+68 69 6A 6B 6C 6D 6E 6F
+70 71 72 73 74 75 76 77
+78 79 7A 7B 7C 7D 7E 7F
+```
+
+The purpose of this pattern is to make it easy to verify that all 128 bytes are preserved through the complete transmission path.
+
+---
+
+# Build
+
+After making the three required configuration changes:
+
+```bash
+cd ~/Desktop/premdai_code/STM32WL55_M0plus_standalone
+
+make clean
+make
+```
+
+If the project uses a specific existing build or flash target, continue using that target after applying the source and configuration changes.
+
+---
+
+# Transmission Chain
+
+The final implementation is:
+
+```text
+Telemetry_GetReceivedData()
+             │
+             ▼
+     128-byte payload
+             │
+             ▼
+ Protocol_CreatePacket()
+             │
+             ▼
+        AX.25 frame
+             │
+             ▼
+       G3RUH scrambling
+             │
+             ▼
+          GMSK
+             │
+             ▼
+          SX1262
+             │
+             ▼
+        RF transmission
+```
+
+The existing radio, G3RUH, and SX1262 transmission implementation is retained for this test.
+
+---
+
+# Files That Should Not Be Changed
+
+For the placeholder-only test, do not modify:
+
+```text
+radio_app.c
+radio_driver/
+protocol/g3ruh/
+ipc/Sring_buffer.c
+ipc/Sring_buffer.h
+ipc/ringbuffer_main.c
+ipc/ipcc_m0plus_main.c
+```
+
+unless a separate build or integration issue specifically requires it.
+
+---
+
+# Future M4 Integration
+
+When the real camera data path is ready, the placeholder implementation inside:
+
+```c
+Telemetry_GetReceivedData()
+```
+
+will be replaced with the M4 → shared SRAM/ring-buffer reader.
+
+The public interface can remain unchanged:
+
+```c
+bool Telemetry_GetReceivedData(
+    uint8_t *buffer,
+    uint16_t bufferSize,
+    uint16_t *dataLength);
+```
+
+The intended future architecture is:
+
+```text
+Camera
+   │
+   ▼
+M4
+   │
+   ▼
+Shared SRAM / Ring Buffer
+   │
+   ▼
+M0+
+   │
+   ▼
+Telemetry_GetReceivedData()
+   │
+   ▼
+128-byte telemetry
+   │
+   ▼
+AX.25
+   │
+   ▼
+G3RUH
+   │
+   ▼
+GMSK
+   │
+   ▼
+SX1262
+```
+
+> **Important:** The current IPC ring-buffer payload definition is not being expanded or enabled as part of this placeholder test. The real M4 integration should be handled separately.
+
+---
+
+# Test Objective
+
+The objective of this version is to verify that a **complete 128-byte binary Information/Data field** can pass through the existing:
+
+```text
+M0+ → AX.25 → G3RUH → GMSK → SX1262
+```
+
+transmission path before introducing the real M4 camera/ring-buffer source.
+pragatibasnet1234@gmail.com
